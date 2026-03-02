@@ -1,4 +1,4 @@
-import os, json, asyncio, logging, threading
+import os, json, logging, threading, asyncio
 from datetime import datetime, time as dtime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -17,16 +17,16 @@ BOT_TOKEN    = os.environ["BOT_TOKEN"]
 ALLOWED_ID   = os.environ.get("ALLOWED_USER_ID", "")
 FOLDER_ID    = os.environ["DRIVE_FOLDER_ID"]
 MORNING_HOUR = int(os.environ.get("MORNING_HOUR", "8"))
-MORNING_MIN  = int(os.environ.get("MORNING_MIN",  "0"))
+MORNING_MIN  = int(os.environ.get("MORNING_MIN", "0"))
 API_SECRET   = os.environ.get("API_SECRET", "specialone2026")
 FILE_NAME    = "specialone_tasks.json"
 PORT         = int(os.environ.get("PORT", "8080"))
 
-# ── FLASK ───────────────────────────────────────────────────────
+# ── FLASK ────────────────────────────────────────────────────────
 flask_app = Flask(__name__)
 CORS(flask_app)
 
-# ── GOOGLE DRIVE ────────────────────────────────────────────────
+# ── GOOGLE DRIVE ─────────────────────────────────────────────────
 def drive_service():
     info  = json.loads(os.environ["GOOGLE_CREDS_JSON"])
     creds = service_account.Credentials.from_service_account_info(
@@ -74,7 +74,7 @@ def write_tasks(tasks):
         logger.error(f"write_tasks: {e}")
         return False
 
-# ── API ROUTES ──────────────────────────────────────────────────
+# ── API ROUTES ────────────────────────────────────────────────────
 def check_auth(req):
     secret = req.headers.get("X-API-Secret") or req.args.get("secret")
     return secret == API_SECRET
@@ -103,7 +103,7 @@ def api_post_tasks():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ── HELPERS ─────────────────────────────────────────────────────
+# ── HELPERS ───────────────────────────────────────────────────────
 def deadline_days(dl):
     if not dl: return None
     try:
@@ -129,17 +129,17 @@ def allowed(update):
     return str(update.effective_user.id) == ALLOWED_ID
 
 def next_id(tasks):
-    return max((t.get("id",0) for t in tasks), default=0) + 1
+    return max((t.get("id", 0) for t in tasks), default=0) + 1
 
 def open_tasks(tasks):
     return [t for t in tasks if t.get("status") != "done"]
 
 def clean(s):
-    return s.replace('*','').replace('_','').replace('[','').replace(']','')
+    return str(s).replace('*','').replace('_','').replace('[','').replace(']','')
 
 def format_task(t, i=None):
     prefix = f"{i}. " if i else "• "
-    dl     = dl_label(t.get("deadline",""))
+    dl     = dl_label(t.get("deadline", ""))
     dl_str = f"  {dl}" if dl else ""
     return f"{prefix}{pri_icon(t.get('pri','low'))} *{clean(t['name'])}*{dl_str}\n   _{t.get('cat','')}_"
 
@@ -177,12 +177,11 @@ def build_morning_message(tasks):
               "/tasks — כל המשימות  |  /done — סמן כהושלם"]
     return "\n".join(lines)
 
-# ── TELEGRAM HANDLERS ───────────────────────────────────────────
+# ── TELEGRAM HANDLERS ─────────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not allowed(update): return
     await update.message.reply_text(
-        f"🦇 *SPECIAL ONE Bot*\n\n"
-        f"ID: `{update.effective_user.id}`\n\n"
+        f"🦇 *SPECIAL ONE Bot*\n\nID: `{update.effective_user.id}`\n\n"
         f"/tasks · /today · /done · /stats\n\n"
         f"*הוסף משימה — פשוט כתוב:*\n"
         f"`משימה` — Mid\n`! משימה` — High 🔴\n`~ משימה` — Low 🟢\n"
@@ -194,14 +193,13 @@ async def cmd_tasks(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     tasks  = read_tasks()
     opened = open_tasks(tasks)
     if not opened:
-        await update.message.reply_text("✅ אין משימות פתוחות!")
-        return
+        await update.message.reply_text("✅ אין משימות פתוחות!"); return
     cats = {}
     for t in opened:
-        cats.setdefault(t.get("cat","General"), []).append(t)
+        cats.setdefault(t.get("cat", "General"), []).append(t)
     lines = [f"📋 *{len(opened)} משימות פתוחות:*\n"]
     for cat, ct in cats.items():
-        lines.append(f"*{cat}*")
+        lines.append(f"*{clean(cat)}*")
         for t in sorted(ct, key=task_score, reverse=True):
             lines.append(format_task(t))
         lines.append("")
@@ -209,24 +207,26 @@ async def cmd_tasks(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_today(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not allowed(update): return
-    await update.message.reply_text(build_morning_message(read_tasks()), parse_mode="Markdown")
+    await update.message.reply_text(
+        build_morning_message(read_tasks()), parse_mode="Markdown")
 
 async def cmd_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not allowed(update): return
     tasks   = read_tasks()
     opened  = open_tasks(tasks)
     done    = [t for t in tasks if t.get("status") == "done"]
-    cats    = {}
-    for t in opened:
-        c = t.get("cat","General"); cats[c] = cats.get(c,0)+1
     overdue = [t for t in opened if deadline_days(t.get("deadline","")) is not None
                and deadline_days(t.get("deadline","")) < 0]
+    cats = {}
+    for t in opened:
+        c = t.get("cat","General"); cats[c] = cats.get(c,0)+1
     lines = ["📊 *SPECIAL ONE Stats*\n",
-             f"✅ הושלמו: *{len(done)}*", f"📂 פתוחות: *{len(opened)}*",
+             f"✅ הושלמו: *{len(done)}*",
+             f"📂 פתוחות: *{len(opened)}*",
              f"🔴 High: *{len([t for t in opened if t.get('pri')=='high'])}*",
              f"⚠️ Overdue: *{len(overdue)}*", "", "*לפי פרויקט:*"]
     for cat, count in sorted(cats.items(), key=lambda x:-x[1]):
-        lines.append(f"  • {cat}: {count}")
+        lines.append(f"  • {clean(cat)}: {count}")
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 async def cmd_done(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -238,8 +238,10 @@ async def cmd_done(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     buttons = [[InlineKeyboardButton(
         f"{pri_icon(t.get('pri','low'))} {t['name'][:38]}",
         callback_data=f"done_{t['id']}")] for t in opened]
-    await update.message.reply_text("✅ *איזו משימה הושלמה?*",
-        reply_markup=InlineKeyboardMarkup(buttons), parse_mode="Markdown")
+    await update.message.reply_text(
+        "✅ *איזו משימה הושלמה?*",
+        reply_markup=InlineKeyboardMarkup(buttons),
+        parse_mode="Markdown")
 
 async def cb_done(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -252,7 +254,8 @@ async def cb_done(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     task["status"]       = "done"
     task["completed_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
     if write_tasks(tasks):
-        await q.edit_message_text(f"✅ *{clean(task['name'])}* — הושלם! 🎉", parse_mode="Markdown")
+        await q.edit_message_text(
+            f"✅ *{clean(task['name'])}* — הושלם! 🎉", parse_mode="Markdown")
     else:
         await q.edit_message_text("❌ שגיאה בשמירה.")
 
@@ -261,20 +264,31 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     if not text: return
     pri, name = "mid", text
-    if text.startswith("!"): pri, name = "high", text[1:].strip()
-    elif text.startswith("~"): pri, name = "low", text[1:].strip()
+    if text.startswith("!"):   pri, name = "high", text[1:].strip()
+    elif text.startswith("~"): pri, name = "low",  text[1:].strip()
     deadline = ""
     if "|" in name:
-        parts = name.split("|",1); name = parts[0].strip(); deadline = parts[1].strip()
+        parts = name.split("|", 1)
+        name, deadline = parts[0].strip(), parts[1].strip()
     tasks = read_tasks()
-    tasks.append({"id": next_id(tasks), "name": name, "detail": "",
-                  "cat": "ARMA GIDEON", "dept": "—", "pri": pri,
-                  "status": "open", "deadline": deadline, "notes": "נוסף מהבוט",
-                  "checklist": [], "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")})
+    tasks.append({
+        "id":         next_id(tasks),
+        "name":       name,
+        "detail":     "",
+        "cat":        "ARMA GIDEON",
+        "dept":       "—",
+        "pri":        pri,
+        "status":     "open",
+        "deadline":   deadline,
+        "notes":      "נוסף מהבוט",
+        "checklist":  [],
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
+    })
     if write_tasks(tasks):
         dl_str = f"\n📅 {deadline}" if deadline else ""
         await update.message.reply_text(
-            f"✅ נוסף: {pri_icon(pri)} *{clean(name)}*{dl_str}", parse_mode="Markdown")
+            f"✅ נוסף: {pri_icon(pri)} *{clean(name)}*{dl_str}",
+            parse_mode="Markdown")
     else:
         await update.message.reply_text("❌ שגיאה בשמירה.")
 
@@ -289,13 +303,10 @@ async def morning_brief(ctx: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"morning_brief: {e}")
 
-# ── MAIN ────────────────────────────────────────────────────────
-def run_flask():
-    flask_app.run(host="0.0.0.0", port=PORT)
-
-def main():
-    threading.Thread(target=run_flask, daemon=True).start()
-    logger.info(f"✅ Flask API on port {PORT}")
+# ── BOT RUNNER (own event loop in thread) ────────────────────────
+def run_bot():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
     tg = Application.builder().token(BOT_TOKEN).build()
     tg.add_handler(CommandHandler("start", cmd_start))
@@ -308,7 +319,15 @@ def main():
     tg.job_queue.run_daily(morning_brief, time=dtime(MORNING_HOUR, MORNING_MIN, 0))
 
     logger.info(f"🦇 Bot running — brief at {MORNING_HOUR:02d}:{MORNING_MIN:02d}")
-    tg.run_polling(allowed_updates=Update.ALL_TYPES)
+    tg.run_polling(allowed_updates=Update.ALL_TYPES, close_loop=False)
 
+# ── MAIN ──────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    main()
+    # Run bot in background thread with its own event loop
+    bot_thread = threading.Thread(target=run_bot, daemon=True)
+    bot_thread.start()
+    logger.info(f"✅ Bot thread started")
+
+    # Run Flask in main thread
+    logger.info(f"✅ Flask API starting on port {PORT}")
+    flask_app.run(host="0.0.0.0", port=PORT, use_reloader=False)
