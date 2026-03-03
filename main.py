@@ -1,4 +1,4 @@
-import os, json, logging, threading, asyncio
+import os, json, logging, threading
 from datetime import datetime, time as dtime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -83,7 +83,6 @@ def check_auth(req):
 def health():
     return jsonify({"status": "ok", "time": datetime.now().isoformat()})
 
-# Main route — used by SPECIAL ONE HTML
 @flask_app.route("/api/data", methods=["GET"])
 def api_data_get():
     tasks = read_tasks()
@@ -94,7 +93,7 @@ def api_data_post():
     if not check_auth(request):
         return jsonify({"error": "Unauthorized"}), 401
     try:
-        data = request.get_json()
+        data  = request.get_json()
         tasks = data.get("tasks", data) if isinstance(data, dict) else data
         if not isinstance(tasks, list):
             return jsonify({"error": "Expected array"}), 400
@@ -104,7 +103,6 @@ def api_data_post():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Also support /tasks route
 @flask_app.route("/tasks", methods=["GET"])
 def api_tasks_get():
     return jsonify(read_tasks())
@@ -203,7 +201,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"🦇 *SPECIAL ONE Bot*\n\nID: `{update.effective_user.id}`\n\n"
         f"/tasks · /today · /done · /stats\n\n"
-        f"*הוסף משימה — פשוט כתוב:*\n"
+        f"*הוסף משימה:*\n"
         f"`משימה` — Mid\n`! משימה` — High 🔴\n`~ משימה` — Low 🟢\n"
         f"`משימה | 2026-03-15` — עם דדליין",
         parse_mode="Markdown")
@@ -323,10 +321,17 @@ async def morning_brief(ctx: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"morning_brief: {e}")
 
-# ── BOT in own thread ─────────────────────────────────────────────
-def run_bot():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+# ── FLASK in background thread ────────────────────────────────────
+def run_flask():
+    logger.info(f"✅ Flask API on port {PORT}")
+    flask_app.run(host="0.0.0.0", port=PORT, use_reloader=False)
+
+# ── MAIN — Bot runs in main thread ───────────────────────────────
+def main():
+    # Flask in background
+    threading.Thread(target=run_flask, daemon=True).start()
+
+    # Bot in main thread
     tg = Application.builder().token(BOT_TOKEN).build()
     tg.add_handler(CommandHandler("start", cmd_start))
     tg.add_handler(CommandHandler("tasks", cmd_tasks))
@@ -336,11 +341,9 @@ def run_bot():
     tg.add_handler(CallbackQueryHandler(cb_done, pattern="^done_"))
     tg.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     tg.job_queue.run_daily(morning_brief, time=dtime(MORNING_HOUR, MORNING_MIN, 0))
-    logger.info(f"🦇 Bot running — brief at {MORNING_HOUR:02d}:{MORNING_MIN:02d}")
-    tg.run_polling(allowed_updates=Update.ALL_TYPES, close_loop=False)
 
-# ── MAIN ──────────────────────────────────────────────────────────
+    logger.info(f"🦇 Bot running — brief at {MORNING_HOUR:02d}:{MORNING_MIN:02d}")
+    tg.run_polling(allowed_updates=Update.ALL_TYPES)
+
 if __name__ == "__main__":
-    threading.Thread(target=run_bot, daemon=True).start()
-    logger.info(f"✅ Flask API on port {PORT}")
-    flask_app.run(host="0.0.0.0", port=PORT, use_reloader=False)
+    main()
