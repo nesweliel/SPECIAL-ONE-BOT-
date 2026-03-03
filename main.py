@@ -1,74 +1,67 @@
-import os, json, logging, io
+import os, json, logging, asyncio, io
 from datetime import datetime, time as dtime
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+import threading
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 
-# הגדרות לוגים
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# משיכת נתונים מה-Variables של Railway
+# ── CONFIG ──
 BOT_TOKEN    = os.environ["BOT_TOKEN"]
 ALLOWED_ID   = os.environ.get("ALLOWED_USER_ID", "")
 FOLDER_ID    = os.environ["DRIVE_FOLDER_ID"]
-MORNING_HOUR = int(os.environ.get("MORNING_HOUR", "8"))
-MORNING_MIN  = int(os.environ.get("MORNING_MIN", "0"))
+PORT         = int(os.environ.get("PORT", "8080"))
 
-# חיבור לגוגל דרייב
-def get_drive_service():
-    info = json.loads(os.environ["GOOGLE_CREDS_JSON"])
-    creds = service_account.Credentials.from_service_account_info(
-        info, scopes=['https://www.googleapis.com/auth/drive'])
-    return build('drive', 'v3', credentials=creds)
+# מסד נתונים זמני (לצורך הוכחת יכולת - בהמשך נחבר לדרייב)
+data = {
+    "tasks": [],
+    "activity": [],
+    "stats": {"completed": 0, "total": 0}
+}
 
-# פקודת התחלה
+# ── FLASK API (הזנת ה-Dashboard) ──
+app = Flask(__name__)
+CORS(app)
+
+@app.route('/api/data', methods=['GET'])
+def get_data():
+    return jsonify(data)
+
+# ── TELEGRAM BOT ──
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ALLOWED_ID: return
+    
+    task_text = update.message.text
+    new_task = {
+        "id": len(data["tasks"]) + 1,
+        "name": task_text,
+        "status": "pending",
+        "time": datetime.now().strftime("%H:%M")
+    }
+    data["tasks"].append(new_task)
+    data["activity"].insert(0, f"נוספה משימה: {task_text}")
+    
+    await update.message.reply_text(f"✅ SPECIAL ONE עודכן: המשימה '{task_text}' נוספה ל-Dashboard.")
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ALLOWED_ID: return
-    await update.message.reply_text("הבוט פעיל! שלח תמונה והיא תעלה לדרייב.")
+    await update.message.reply_text("🦇 **SPECIAL ONE OS v5.0**\nמערכת השליטה מחוברת. שלח משימה או תמונה.")
 
-# טיפול בתמונה
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ALLOWED_ID: return
-    
-    msg = await update.message.reply_text("מעלה לדרייב... ⏳")
-    photo_file = await update.message.photo[-1].get_file()
-    buf = io.BytesIO()
-    await photo_file.download_to_memory(buf)
-    buf.seek(0)
-
-    filename = f"photo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
-    
-    try:
-        service = get_drive_service()
-        file_metadata = {'name': filename, 'parents': [FOLDER_ID]}
-        media = MediaIoBaseUpload(buf, mimetype='image/jpeg', resumable=True)
-        service.files().create(body=file_metadata, media_body=media).execute()
-        await msg.edit_text(f"✅ עלה בהצלחה!\nשם: {filename}")
-    except Exception as e:
-        logger.error(e)
-        await msg.edit_text("❌ תקלה בהעלאה.")
-
-# הודעת בוקר
-async def morning_msg(context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(chat_id=ALLOWED_ID, text="בוקר טוב! הבוט מוכן לעבודה. ☀️")
+# ── RUNNER ──
+def run_flask():
+    app.run(host='0.0.0.0', port=PORT)
 
 def main():
-    # יצירת הבוט
-    app = Application.builder().token(BOT_TOKEN).build()
-    
-    # הוספת פקודות
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    
-    # תזמון הודעת בוקר
-    if app.job_queue:
-        app.job_queue.run_daily(morning_msg, time=dtime(MORNING_HOUR, MORNING_MIN))
-    
-    logger.info("Bot started...")
-    app.run_polling()
+    # הרצת ה-API בנפרד כדי שה-HTML יוכל לקרוא נתונים
+    threading.Thread(target=run_flask, daemon=True).start()
+
+    # הרצת הבוט
+    application = Application.builder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    application.run_polling()
 
 if __name__ == "__main__":
     main()
