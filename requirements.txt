@@ -1,5 +1,4 @@
-python-telegram-bot[job-queue]==21.3
-google-auth==2.29.0
-google-api-python-client==2.126.0
-flask==3.0.3
-flask-cors==4.0.1
+python-telegram-bot[job-queue]==21.10
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
